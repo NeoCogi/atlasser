@@ -31,9 +31,10 @@
 use fontdue::*;
 use png::BitDepth;
 use png::ColorType;
-use std::fs::*;
-use std::io::*;
 use rect_packer::*;
+use std::fs::*;
+use std::io;
+use std::io::*;
 
 fn write_image(path: &str, width: usize, height: usize, pixels: &[u8]) {
     // png writer
@@ -45,24 +46,29 @@ fn write_image(path: &str, width: usize, height: usize, pixels: &[u8]) {
     encoder.set_depth(png::BitDepth::Eight);
 
     let mut writer = encoder.write_header().unwrap();
-    
+
     writer.write_image_data(pixels).unwrap();
 }
 
-fn load_image(path: &str) -> (usize, usize, Vec<u8>) {
-    let mut decoder = png::Decoder::new(File::open(path).unwrap());
+fn load_image(path: &str) -> Result<(usize, usize, Vec<u8>)> {
+    let mut decoder = png::Decoder::new(File::open(path)?);
     decoder.set_transformations(png::Transformations::normalize_to_color8());
     let mut reader = decoder.read_info().unwrap();
     let mut img_data = vec![0; reader.output_buffer_size()];
-    let info = reader.next_frame(&mut img_data).unwrap();
+    let info = reader.next_frame(&mut img_data)?;
 
     println!("format   : {:?}", info.color_type);
     println!("data size: {}", img_data.len());
     println!("line size: {}", info.line_size);
-    println!("practical: {}x{}x4 = {}", info.width, info.height, info.width * info.height * 4);
+    println!(
+        "practical: {}x{}x4 = {}",
+        info.width,
+        info.height,
+        info.width * info.height * 4
+    );
     println!("bit depth: {:?}bits", info.bit_depth);
 
-    assert!(info.bit_depth == BitDepth::Eight);
+    assert_eq!(info.bit_depth, BitDepth::Eight);
 
     let pixel_size = match info.color_type {
         ColorType::Grayscale => 1,
@@ -72,7 +78,7 @@ fn load_image(path: &str) -> (usize, usize, Vec<u8>) {
         ColorType::Rgba => 4,
     };
 
-    let mut pixels = vec! { 0u8; (info.width * info.height) as usize };
+    let mut pixels = vec![0u8; (info.width * info.height) as usize];
     let line_size = info.line_size;
     for y in 0..info.height {
         let line = &img_data[(y as usize * line_size)..((y as usize + 1) * line_size)];
@@ -83,37 +89,90 @@ fn load_image(path: &str) -> (usize, usize, Vec<u8>) {
                 ColorType::Grayscale => line[xx],
                 ColorType::GrayscaleAlpha => line[xx + 1],
                 ColorType::Indexed => todo!(),
-                ColorType::Rgb => ((line[xx] as u32 + line[xx + 1] as u32 + line[xx * 2] as u32) / 3) as u8,
-                ColorType::Rgba => line[xx + 3]
+                ColorType::Rgb => {
+                    ((line[xx] as u32 + line[xx + 1] as u32 + line[xx + 2] as u32) / 3) as u8
+                }
+                ColorType::Rgba => line[xx + 3],
             };
             pixels[(x + y * info.width) as usize] = color;
-
         }
     }
 
-    (info.width as _,
-        info.height as _,
-        pixels)
+    Ok((info.width as _, info.height as _, pixels))
+}
+
+fn list_files_with_extension(dir: ReadDir) -> (Vec<String>, Vec<String>) {
+    let entries = dir
+        .filter(|x| match x {
+            Ok(t) if t.file_type().unwrap().is_file() => true,
+            _ => false,
+        })
+        .map(|x| x.unwrap().file_name().to_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+
+    let icons = entries
+        .iter()
+        .filter(|x| x.ends_with(".png"))
+        .map(|x| x.clone())
+        .collect::<Vec<_>>();
+
+    let fonts = entries
+        .iter()
+        .filter(|x| x.ends_with(".ttf"))
+        .map(|x| x.clone())
+        .collect::<Vec<_>>();
+
+        (icons, fonts)
 }
 
 fn main() {
+    let args = std::env::args().collect::<Vec<_>>();
 
-    let (width, height, icon_data) = load_image("/home/aifu/Downloads/folder-open-outline.png");
+    if args.len() != 2 {
+        println!("usage: {} /path/to/assets", args[0]);
+        return;
+    }
+
+    let folder = &args[1];
+    let dir = match std::fs::read_dir(folder) {
+        Ok(r) => r,
+        Err(e) => {
+            println!("Error reading dir: {}", e);
+            return;
+        }
+    };
+
+    let (icons, fonts) = list_files_with_extension(dir);
+    println!("icons: {:?}", icons);
+    println!("fonts: {:?}", fonts);
+
+    let (width, height, icon_data) =
+        match load_image("/home/aifu/Downloads/folder-open-outline.png") {
+            Ok(x) => x,
+            Err(e) => {
+                println!("Error loading: {}", e);
+                return;
+            }
+        };
+
     println!("width: {}, height: {}", width, height);
 
     let config = rect_packer::Config {
         width: 128,
         height: 128,
-    
+
         border_padding: 1,
         rectangle_padding: 1,
     };
-    
-    let mut pixels = vec! { 0u8; (config.width * config.height) as _ };
-    
+
+    let mut pixels = vec![0u8; (config.width * config.height) as _];
+
     let mut data = Vec::new();
-    File::open("/usr/local/share/fonts/f/fixedsys_excelsior_301.ttf").unwrap().read_to_end(&mut data).unwrap();
-    
+    File::open("/usr/local/share/fonts/f/fixedsys_excelsior_301.ttf")
+        .unwrap()
+        .read_to_end(&mut data)
+        .unwrap();
+
     let font = Font::from_bytes(data, FontSettings::default()).unwrap();
 
     let mut packer = Packer::new(config);
@@ -122,12 +181,12 @@ fn main() {
         Some(r) => {
             for y in 0..height {
                 for x in 0..width {
-                    pixels[(r.x + x as i32 + (r.y + y as i32) * config.width) as usize] = icon_data[x + y * width];
+                    pixels[(r.x + x as i32 + (r.y + y as i32) * config.width) as usize] =
+                        icon_data[x + y * width];
                 }
             }
-
-        },
-        _ => ()
+        }
+        _ => (),
     }
 
     for i in 32..127 {
@@ -139,12 +198,12 @@ fn main() {
             Some(r) => {
                 for y in 0..metrics.height {
                     for x in 0..metrics.width {
-                        pixels[(r.x + x as i32 + (r.y + y as i32) * config.width) as usize] = bitmap[x + y * metrics.width];
+                        pixels[(r.x + x as i32 + (r.y + y as i32) * config.width) as usize] =
+                            bitmap[x + y * metrics.width];
                     }
                 }
-
-            },
-            _ => ()
+            }
+            _ => (),
         }
 
         //println!("metrics: {:?}", metrics);
@@ -152,6 +211,10 @@ fn main() {
         println!("{} - rect: {:?}", ch, rect);
     }
 
-    write_image("atlas.png", config.width as _, config.height as _, pixels.as_slice());
-
+    write_image(
+        "atlas.png",
+        config.width as _,
+        config.height as _,
+        pixels.as_slice(),
+    );
 }
