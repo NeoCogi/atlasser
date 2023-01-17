@@ -1,5 +1,5 @@
 //
-// Copyright 2021-Present (c) Raja Lehtihet & Wael El Oraiby
+// Copyright 2023-Present (c) Raja Lehtihet & Wael El Oraiby
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are met:
@@ -28,78 +28,16 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //
 
-use fontdue::*;
-use png::BitDepth;
-use png::ColorType;
-use rect_packer::*;
+use std::collections::HashMap;
+use std::env;
 use std::fs::*;
-use std::io;
 use std::io::*;
 
-fn write_image(path: &str, width: usize, height: usize, pixels: &[u8]) {
-    // png writer
-    let file = File::create(path).unwrap();
-    let ref mut w = BufWriter::new(file);
+use rs_math3d::*;
 
-    let mut encoder = png::Encoder::new(w, width as _, height as _); // Width is 2 pixels and height is 1.
-    encoder.set_color(png::ColorType::Grayscale);
-    encoder.set_depth(png::BitDepth::Eight);
+use crate::atlas::Atlas;
 
-    let mut writer = encoder.write_header().unwrap();
-
-    writer.write_image_data(pixels).unwrap();
-}
-
-fn load_image(path: &str) -> Result<(usize, usize, Vec<u8>)> {
-    let mut decoder = png::Decoder::new(File::open(path)?);
-    decoder.set_transformations(png::Transformations::normalize_to_color8());
-    let mut reader = decoder.read_info().unwrap();
-    let mut img_data = vec![0; reader.output_buffer_size()];
-    let info = reader.next_frame(&mut img_data)?;
-
-    println!("format   : {:?}", info.color_type);
-    println!("data size: {}", img_data.len());
-    println!("line size: {}", info.line_size);
-    println!(
-        "practical: {}x{}x4 = {}",
-        info.width,
-        info.height,
-        info.width * info.height * 4
-    );
-    println!("bit depth: {:?}bits", info.bit_depth);
-
-    assert_eq!(info.bit_depth, BitDepth::Eight);
-
-    let pixel_size = match info.color_type {
-        ColorType::Grayscale => 1,
-        ColorType::GrayscaleAlpha => 2,
-        ColorType::Indexed => 1,
-        ColorType::Rgb => 3,
-        ColorType::Rgba => 4,
-    };
-
-    let mut pixels = vec![0u8; (info.width * info.height) as usize];
-    let line_size = info.line_size;
-    for y in 0..info.height {
-        let line = &img_data[(y as usize * line_size)..((y as usize + 1) * line_size)];
-
-        for x in 0..info.width {
-            let xx = (x * pixel_size) as usize;
-            let color = match info.color_type {
-                ColorType::Grayscale => line[xx],
-                ColorType::GrayscaleAlpha => line[xx + 1],
-                ColorType::Indexed => todo!(),
-                ColorType::Rgb => {
-                    ((line[xx] as u32 + line[xx + 1] as u32 + line[xx + 2] as u32) / 3) as u8
-                }
-                ColorType::Rgba => line[xx + 3],
-            };
-            pixels[(x + y * info.width) as usize] = color;
-        }
-    }
-
-    Ok((info.width as _, info.height as _, pixels))
-}
+mod atlas;
 
 fn list_files_with_extension(dir: ReadDir) -> (Vec<String>, Vec<String>) {
     let entries = dir
@@ -107,7 +45,7 @@ fn list_files_with_extension(dir: ReadDir) -> (Vec<String>, Vec<String>) {
             Ok(t) if t.file_type().unwrap().is_file() => true,
             _ => false,
         })
-        .map(|x| x.unwrap().file_name().to_str().unwrap().to_string())
+        .map(|x| x.unwrap().path().to_str().unwrap().to_string())
         .collect::<Vec<_>>();
 
     let icons = entries
@@ -122,18 +60,34 @@ fn list_files_with_extension(dir: ReadDir) -> (Vec<String>, Vec<String>) {
         .map(|x| x.clone())
         .collect::<Vec<_>>();
 
-        (icons, fonts)
+    (icons, fonts)
 }
 
 fn main() {
-    let args = std::env::args().collect::<Vec<_>>();
+    let mut args = env::args().peekable();
+    let mut arg_val = HashMap::new();
 
-    if args.len() != 2 {
-        println!("usage: {} /path/to/assets", args[0]);
+    while args.peek().is_some() {
+        let arg = args.next().unwrap();
+        if arg.starts_with("--") {
+            match args.peek() {
+                Some(v) if !v.starts_with("--") => {
+                    let key = arg.clone();
+                    arg_val.insert(key, args.next().unwrap());
+                }
+                _ => ()
+            }
+        }
+    }
+
+    
+    
+    if !arg_val.contains_key("--path") && !arg_val.contains_key("--font-size") && !arg_val.contains_key("--atlas-size") {
+        println!("usage: {} --path /path/to/assets --font-size 16", env::args().nth(0).unwrap());
         return;
     }
 
-    let folder = &args[1];
+    let folder = arg_val["--path"].clone();
     let dir = match std::fs::read_dir(folder) {
         Ok(r) => r,
         Err(e) => {
@@ -142,79 +96,58 @@ fn main() {
         }
     };
 
-    let (icons, fonts) = list_files_with_extension(dir);
-    println!("icons: {:?}", icons);
-    println!("fonts: {:?}", fonts);
-
-    let (width, height, icon_data) =
-        match load_image("/home/aifu/Downloads/folder-open-outline.png") {
-            Ok(x) => x,
-            Err(e) => {
-                println!("Error loading: {}", e);
-                return;
-            }
-        };
-
-    println!("width: {}, height: {}", width, height);
-
-    let config = rect_packer::Config {
-        width: 128,
-        height: 128,
-
-        border_padding: 1,
-        rectangle_padding: 1,
+    let font_size = match arg_val["--font-size"].parse::<usize>() {
+        Ok(s) => s,
+        Err(e) => {
+            println!("Error: invalide font size: {}", e.to_string());
+            return;
+        }
     };
 
-    let mut pixels = vec![0u8; (config.width * config.height) as _];
-
-    let mut data = Vec::new();
-    File::open("/usr/local/share/fonts/f/fixedsys_excelsior_301.ttf")
-        .unwrap()
-        .read_to_end(&mut data)
-        .unwrap();
-
-    let font = Font::from_bytes(data, FontSettings::default()).unwrap();
-
-    let mut packer = Packer::new(config);
-
-    match packer.pack(width as _, height as _, false) {
-        Some(r) => {
-            for y in 0..height {
-                for x in 0..width {
-                    pixels[(r.x + x as i32 + (r.y + y as i32) * config.width) as usize] =
-                        icon_data[x + y * width];
-                }
-            }
+    let atlas_size = match arg_val["--atlas-size"].parse::<usize>() {
+        Ok(s) => s,
+        Err(e) => {
+            println!("Error: invalide font size: {}", e.to_string());
+            return;
         }
-        _ => (),
-    }
+    };
 
-    for i in 32..127 {
-        // Rasterize and get the layout metrics for the letter at font size.
-        let ch = i as u8 as char;
-        let (metrics, bitmap) = font.rasterize(ch, 16.0);
-        let rect = packer.pack(metrics.width as _, metrics.height as _, false);
-        match rect {
-            Some(r) => {
-                for y in 0..metrics.height {
-                    for x in 0..metrics.width {
-                        pixels[(r.x + x as i32 + (r.y + y as i32) * config.width) as usize] =
-                            bitmap[x + y * metrics.width];
-                    }
-                }
+    let (icons, fonts) = list_files_with_extension(dir);
+    let mut atlas = Atlas::new(atlas_size, atlas_size);
+    for icon in icons {
+        match atlas.add_icon(&icon) {
+            Err(e) => {
+                println!("Error: Unable to add {}: {}", icon, e.to_string());
+                return;
+            },
+            _ => (),
+        };
+    }
+    for font in fonts {
+        match atlas.add_font(&font, font_size) {
+            Err(e) => {
+                println!("Error: Unable to add {}: {}", font, e.to_string());
+                return;
             }
             _ => (),
         }
-
-        //println!("metrics: {:?}", metrics);
-        //println!("{:?}", bitmap);
-        println!("{} - rect: {:?}", ch, rect);
     }
 
-    write_image(
-        "atlas.png",
-        config.width as _,
-        config.height as _,
-        pixels.as_slice(),
-    );
+    for (i, _) in &atlas.icons {
+        println!("icon {}", i);
+    }
+
+    for (f, _) in &atlas.fonts {
+        println!("font {}", f);
+    }
+
+    if arg_val.contains_key("--save-png") {
+        match atlas.save_png_image(arg_val["--save-png"].as_str()) {
+            Err(e) => {
+                println!("Error: Unable to save PNG file: {}", e);
+                return;
+            }
+            _ => ()
+        }
+    }
 }
