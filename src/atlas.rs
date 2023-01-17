@@ -45,7 +45,8 @@ pub struct CharEntry {
 }
 
 pub struct Font {
-    size: usize,             // font size in pixels
+    line_size: usize,        // line size
+    font_size: usize,        // font size in pixels
     entries: Vec<CharEntry>, // all printable chars [32-127]
 }
 
@@ -57,8 +58,8 @@ impl Debug for Font {
             entries.write_fmt(format_args!("{:?}, ", e))?;
         }
         f.write_fmt(format_args!(
-            "Font {{ size: {}, entries: [{}] }}",
-            self.size, entries
+            "Font {{ line_size: {}, font_size: {}, entries: [{}] }}",
+            self.line_size, self.font_size, entries
         ))
     }
 }
@@ -109,6 +110,8 @@ impl Atlas {
     pub fn add_font(&mut self, path: &str, size: usize) -> Result<()> {
         let font = Self::load_font(path)?;
         let mut entries = Vec::new();
+        let mut min_y = i32::MAX;
+        let mut max_y = -i32::MAX;
         for i in 32..127 {
             // Rasterize and get the layout metrics for the letter at font size.
             let ch = i as u8 as char;
@@ -120,10 +123,18 @@ impl Atlas {
                 rect,
             };
             entries.push(ce);
+            min_y = min_y.min(size as i32 - metrics.ymin - metrics.height as i32);
+            max_y = max_y.max(size as i32 - metrics.ymin - metrics.height as i32);
         }
 
-        self.fonts
-            .push((Self::format_path(path), Font { size, entries }));
+        self.fonts.push((
+            Self::format_path(path),
+            Font {
+                line_size: (max_y - min_y) as usize,
+                font_size: size,
+                entries,
+            },
+        ));
         Ok(())
     }
 
@@ -159,7 +170,8 @@ pub struct CharEntry {
 }
 
 pub struct Font {
-    pub size: usize,             // font size in pixels
+    pub line_size: usize,         // line size in pixels
+    pub font_size: usize,         // font size in pixels
     pub entries: [CharEntry; 95], // all printable chars [32-127]
 }
 
