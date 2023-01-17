@@ -75,15 +75,19 @@ fn main() {
                     let key = arg.clone();
                     arg_val.insert(key, args.next().unwrap());
                 }
-                _ => ()
+                _ => (),
             }
         }
     }
 
-    
-    
-    if !arg_val.contains_key("--path") && !arg_val.contains_key("--font-size") && !arg_val.contains_key("--atlas-size") {
-        println!("usage: {} --path /path/to/assets --font-size 16", env::args().nth(0).unwrap());
+    if !arg_val.contains_key("--path")
+        || !arg_val.contains_key("--font-size")
+        || !arg_val.contains_key("--atlas-size")
+    {
+        println!(
+            "usage example: {} --path /path/to/assets --font-size 16 --atlas-size 256",
+            env::args().nth(0).unwrap()
+        );
         return;
     }
 
@@ -119,7 +123,7 @@ fn main() {
             Err(e) => {
                 println!("Error: Unable to add {}: {}", icon, e.to_string());
                 return;
-            },
+            }
             _ => (),
         };
     }
@@ -147,7 +151,9 @@ fn main() {
                 println!("Error: Unable to save PNG file: {}", e);
                 return;
             }
-            _ => ()
+            _ => (),
         }
     }
+
+    atlas.save_as_rust("atlas_data.rs");
 }
