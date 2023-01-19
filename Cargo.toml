@@ -10,6 +10,7 @@ rs-math3d = "0.9.21"
 fontdue = "0.7.2"
 rect_packer = "0.2.1"
 png = "0.17.7"
+clap = {version = "4.1.1", features =["derive"] }
 
 [profile.release]
 panic = 'abort'

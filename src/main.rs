@@ -32,6 +32,7 @@ use std::collections::HashMap;
 use std::env;
 use std::fs::*;
 use std::io::*;
+use std::path::PathBuf;
 
 use rs_math3d::*;
 
@@ -39,7 +40,34 @@ use crate::atlas::Atlas;
 
 mod atlas;
 
-fn list_files_with_extension(dir: ReadDir) -> (Vec<String>, Vec<String>) {
+use clap::{Parser, Subcommand};
+
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    /// path to assets (icons, fonts)
+    #[arg(short, long="icon-path", value_name = "icon-path")]
+    icon_path: PathBuf,
+
+    /// atlas size
+    #[arg(short, long, value_name = "atlas-size")]
+    atlas_size: usize,
+
+
+    /// save to png
+    #[arg(long, value_name = "save-png")]
+    png_file: Option<String>,
+
+    /// font name
+    #[arg(short='f', long="font", value_name = "font")]
+    fonts: Vec<String>,
+
+    /// font size
+    #[arg(short='s', long="size", value_name = "size")]
+    sizes: Vec<usize>,
+}
+
+fn list_icons_with_extension(dir: ReadDir) -> Vec<String> {
     let entries = dir
         .filter(|x| match x {
             Ok(t) if t.file_type().unwrap().is_file() => true,
@@ -48,51 +76,18 @@ fn list_files_with_extension(dir: ReadDir) -> (Vec<String>, Vec<String>) {
         .map(|x| x.unwrap().path().to_str().unwrap().to_string())
         .collect::<Vec<_>>();
 
-    let icons = entries
+    entries
         .iter()
         .filter(|x| x.ends_with(".png"))
         .map(|x| x.clone())
-        .collect::<Vec<_>>();
-
-    let fonts = entries
-        .iter()
-        .filter(|x| x.ends_with(".ttf"))
-        .map(|x| x.clone())
-        .collect::<Vec<_>>();
-
-    (icons, fonts)
+        .collect::<Vec<_>>()
 }
 
 fn main() {
-    let mut args = env::args().peekable();
-    let mut arg_val = HashMap::new();
+    let args = Cli::parse();
 
-    while args.peek().is_some() {
-        let arg = args.next().unwrap();
-        if arg.starts_with("--") {
-            match args.peek() {
-                Some(v) if !v.starts_with("--") => {
-                    let key = arg.clone();
-                    arg_val.insert(key, args.next().unwrap());
-                }
-                _ => (),
-            }
-        }
-    }
-
-    if !arg_val.contains_key("--path")
-        || !arg_val.contains_key("--font-size")
-        || !arg_val.contains_key("--atlas-size")
-    {
-        println!(
-            "usage example: {} --path /path/to/assets --font-size 16 --atlas-size 256",
-            env::args().nth(0).unwrap()
-        );
-        return;
-    }
-
-    let folder = arg_val["--path"].clone();
-    let dir = match std::fs::read_dir(folder) {
+    let icon_folder = args.icon_path.to_str().unwrap().to_string();
+    let icon_dir = match std::fs::read_dir(icon_folder) {
         Ok(r) => r,
         Err(e) => {
             println!("Error reading dir: {}", e);
@@ -100,24 +95,8 @@ fn main() {
         }
     };
 
-    let font_size = match arg_val["--font-size"].parse::<usize>() {
-        Ok(s) => s,
-        Err(e) => {
-            println!("Error: invalide font size: {}", e.to_string());
-            return;
-        }
-    };
-
-    let atlas_size = match arg_val["--atlas-size"].parse::<usize>() {
-        Ok(s) => s,
-        Err(e) => {
-            println!("Error: invalide font size: {}", e.to_string());
-            return;
-        }
-    };
-
-    let (icons, fonts) = list_files_with_extension(dir);
-    let mut atlas = Atlas::new(atlas_size, atlas_size);
+    let icons = list_icons_with_extension(icon_dir);
+    let mut atlas = Atlas::new(args.atlas_size, args.atlas_size);
     for icon in icons {
         match atlas.add_icon(&icon) {
             Err(e) => {
@@ -127,8 +106,14 @@ fn main() {
             _ => (),
         };
     }
-    for font in fonts {
-        match atlas.add_font(&font, font_size) {
+    if args.fonts.len() != args.sizes.len() {
+        println!("Both fonts and size count should be the same");
+        return;
+    }
+
+    let font_size = args.fonts.iter().zip(args.sizes.iter());
+    for (font, size) in font_size {
+        match atlas.add_font(font, *size) {
             Err(e) => {
                 println!("Error: Unable to add {}: {}", font, e.to_string());
                 return;
@@ -145,8 +130,8 @@ fn main() {
         println!("font {}", f);
     }
 
-    if arg_val.contains_key("--save-png") {
-        match atlas.save_png_image(arg_val["--save-png"].as_str()) {
+    if args.png_file.is_some() {
+        match atlas.save_png_image(args.png_file.unwrap().as_str()) {
             Err(e) => {
                 println!("Error: Unable to save PNG file: {}", e);
                 return;
