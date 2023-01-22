@@ -1,7 +1,7 @@
 # Atlasser
 The atlasser for the microui/neocogi UI
 
-![Atlas](atlas.png)
+![Atlas](docs/atlas.png)
 ## Build
 
 Small size build
